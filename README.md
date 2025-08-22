@@ -25,6 +25,40 @@ In the output, you'll find options to open the app in a
 
 You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
 
+## Project structure (Vitals BLE)
+
+- `app/splash.jsx` – Loading screen with VitalLink logo shown on launch
+- `app/index.jsx` – Home menu to navigate to device selection
+- `app/devices.jsx` – Scans for whitelisted BLE devices and lets user choose one
+- `app/stream.jsx` – Connects and streams raw packets; shows live hex and parsed views
+- `constants/bleDevices.js` – Whitelist of supported devices (names, UUIDs, parser mapping)
+- `lib/bleClient.js` – BLE abstraction; web/dev mock included; replace with native impl for real hardware
+- `lib/parser.js` – Parser registry; add custom parsers and reference by `parserId`
+
+### Configure supported devices
+
+Edit `constants/bleDevices.js` and add your device entries like:
+
+// in constants/bleDevices.js
+// {
+//   id: 'my-sensor',
+//   name: 'VitalLink123',
+//   services: { primary: 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx' },
+//   characteristics: { notify: 'yyyyyyyy-yyyy-yyyy-yyyy-yyyyyyyyyyyy' },
+//   desiredMTU: 247,
+//   defaultPacketLength: 20,
+//   parserId: 'my-parser'
+// }
+
+Then implement a parser in `lib/parser.js`:
+
+// in lib/parser.js
+// registerParser('my-parser', (bytes) => ({ /* return JSON */ }));
+
+### BLE implementation
+
+The included BLE client has a mock for Web/development. To stream from real devices on iOS/Android you'll need to wire in a native BLE library (e.g., `react-native-ble-plx`) and implement scan/connect/subscribe in `lib/bleClient.js`.
+
 ## Get a fresh project
 
 When you're ready, run:

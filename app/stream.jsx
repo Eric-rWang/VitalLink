@@ -1,0 +1,262 @@
+import { useLocalSearchParams } from 'expo-router';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import CollapsibleSection from '../components/CollapsibleSection';
+import WaveformChart from '../components/WaveformChart';
+import { DEVICE_WHITELIST, getDeviceById } from '../constants/bleDevices';
+import { colors, radius, spacing } from '../constants/theme';
+import { BLEClient } from '../lib/bleClient';
+import { getParser } from '../lib/parser';
+
+function bytesToHex(bytes) {
+  return [...bytes].map((b) => b.toString(16).padStart(2, '0')).join(' ');
+}
+
+import * as FileSystem from 'expo-file-system';
+export default function StreamScreen() {
+  const params = useLocalSearchParams();
+  const ble = useMemo(() => new BLEClient(), []);
+  const unsubRef = useRef(null);
+  const [status, setStatus] = useState('idle');
+  const [lastHex, setLastHex] = useState('');
+  const [packets, setPackets] = useState(0);
+  const [parsed, setParsed] = useState(null);
+  const [wave, setWave] = useState([]);
+  const waveBufRef = useRef([]);
+  const [recording, setRecording] = useState(false);
+  const recordHeaderRef = useRef(null); // string[]
+  const recordRowsRef = useRef([]); // string[] of csv lines
+  const [lastSavedPath, setLastSavedPath] = useState(null);
+  const [showNameModal, setShowNameModal] = useState(false);
+  const [fileName, setFileName] = useState('');
+  const [saveDir, setSaveDir] = useState(null); // { type: 'app' } or { type: 'android-saf', uri }
+  const [saveDirLabel, setSaveDirLabel] = useState('App Documents');
+
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        setStatus('connecting');
+        // Map route params to whitelist device entry if available
+        const wl = DEVICE_WHITELIST.find((d) => d.name === params.name) || getDeviceById(params.deviceId);
+        const mtu = wl?.desiredMTU;
+        const parser = getParser(wl?.parserId);
+        const { unsubscribe } = await ble.connectAndSubscribe({ id: params.deviceId, name: params.name }, {
+          mtu,
+          onData: (bytes) => {
+            if (!mounted) return;
+            // bytes is Uint8Array from client
+            setPackets((p) => p + 1);
+            const hex = bytesToHex(bytes);
+            setLastHex(hex);
+            try {
+              const out = parser ? parser(bytes) : null;
+              setParsed(out);
+              if (out && typeof out.value === 'number') {
+                // maintain a rolling buffer of samples for the chart
+                const buf = waveBufRef.current.slice();
+                buf.push(out.value);
+                const maxPoints = 360; // ~3.6s at 100 Hz visualized
+                if (buf.length > maxPoints) buf.splice(0, buf.length - maxPoints);
+                waveBufRef.current = buf;
+                setWave(buf);
+              }
+              // recording buffer
+              if (recording) {
+                const now = Date.now();
+                const sampleObj = out && typeof out === 'object' ? out : { value: out };
+                if (!recordHeaderRef.current) {
+                  const keys = Object.keys(sampleObj || {});
+                  recordHeaderRef.current = ['time_ms', ...keys];
+                  recordRowsRef.current.push(recordHeaderRef.current.join(','));
+                }
+                const cols = recordHeaderRef.current;
+                const row = [String(now), ...cols.slice(1).map(k => safeCSV(sampleObj?.[k]))].join(',');
+                recordRowsRef.current.push(row);
+              }
+            } catch { /* ignore */ }
+          },
+        });
+        unsubRef.current = unsubscribe;
+        setStatus('streaming');
+      } catch (e) {
+        console.warn('Connect/subscribe error', e);
+        setStatus('error');
+      }
+    })();
+    return () => { mounted = false; unsubRef.current?.(); ble.disconnect(); };
+  }, [ble, params.deviceId, params.name]);
+
+  const openNameModal = () => {
+    // suggest default name
+    const nameSafe = String(params.name || 'device').replace(/[^a-z0-9_-]/gi, '_');
+    const ts = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+    setFileName(`${nameSafe}_${ts}`);
+    if (!saveDir) {
+      // default to app documents
+      setSaveDir({ type: 'app' });
+      setSaveDirLabel('App Documents');
+    }
+    setShowNameModal(true);
+  };
+
+  const startRecording = () => {
+    setShowNameModal(false);
+    setLastSavedPath(null);
+    recordHeaderRef.current = null;
+    recordRowsRef.current = [];
+    setRecording(true);
+  };
+
+  const stopRecording = async () => {
+    setRecording(false);
+    try {
+      const base = sanitizeBaseName(fileName || (params.name || 'device'));
+      const filename = base.toLowerCase().endsWith('.csv') ? base : `${base}.csv`;
+      const content = recordRowsRef.current.join('\n');
+      let savedPath = null;
+      if (saveDir?.type === 'android-saf' && Platform.OS === 'android') {
+        const SAF = FileSystem.StorageAccessFramework;
+        let targetDir = saveDir.uri;
+        // Ensure 'data' subdir exists (create or find)
+        try {
+          targetDir = await SAF.createDirectoryAsync(targetDir, 'data');
+        } catch (e) {
+          try {
+            const children = await SAF.readDirectoryAsync(saveDir.uri);
+            const existing = children.find((u) => /(^|\/)data(\/.+)?$/i.test(u));
+            if (existing) targetDir = existing;
+          } catch {}
+        }
+        const fileUri = await SAF.createFileAsync(targetDir, filename, 'text/csv');
+        await FileSystem.writeAsStringAsync(fileUri, content, { encoding: FileSystem.EncodingType.UTF8 });
+        savedPath = fileUri;
+      } else {
+        // App documents default
+        const baseDir = FileSystem.documentDirectory + 'data/';
+        await FileSystem.makeDirectoryAsync(baseDir, { intermediates: true });
+        const path = baseDir + filename;
+        await FileSystem.writeAsStringAsync(path, content, { encoding: FileSystem.EncodingType.UTF8 });
+        savedPath = path;
+      }
+      setLastSavedPath(savedPath);
+    } catch (e) {
+      console.warn('Failed to save CSV', e);
+    }
+  };
+
+  function sanitizeBaseName(s) {
+    return String(s).trim().replace(/[^a-z0-9._-]/gi, '_');
+  }
+
+  async function chooseFolder() {
+    if (Platform.OS === 'android') {
+      try {
+        const SAF = FileSystem.StorageAccessFramework;
+        const perm = await SAF.requestDirectoryPermissionsAsync();
+        if (perm.granted) {
+          setSaveDir({ type: 'android-saf', uri: perm.directoryUri });
+          setSaveDirLabel('Android SAF');
+        }
+      } catch (e) {
+        console.warn('Folder selection failed', e);
+      }
+    } else {
+      // iOS: sandboxed; use app documents
+      setSaveDir({ type: 'app' });
+      setSaveDirLabel('App Documents');
+    }
+  }
+
+  return (
+    <View style={styles.container}>
+      <Modal visible={showNameModal} animationType="fade" transparent onRequestClose={() => setShowNameModal(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Name your recording</Text>
+            <TextInput value={fileName} onChangeText={setFileName} placeholder="filename" placeholderTextColor={colors.textSecondary}
+              style={styles.input} autoFocus returnKeyType="done" onSubmitEditing={startRecording} />
+            <View style={styles.dirRow}>
+              <Text style={styles.dirText}>Save to: {saveDirLabel}</Text>
+              <TouchableOpacity onPress={chooseFolder} style={[styles.modalBtn, styles.okBtn]}>
+                <Text style={[styles.modalBtnText, { color: '#000' }]}>Choose Folder</Text>
+              </TouchableOpacity>
+            </View>
+            <View style={styles.modalRow}>
+              <TouchableOpacity onPress={() => setShowNameModal(false)} style={[styles.modalBtn, styles.cancelBtn]}>
+                <Text style={styles.modalBtnText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={startRecording} style={[styles.modalBtn, styles.okBtn]}>
+                <Text style={[styles.modalBtnText, { color: '#000' }]}>Start</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+      <Text style={styles.header}>Device: {params.name}</Text>
+      <View style={styles.topRow}>
+        <Text style={styles.meta}>Status: {status} • Packets: {packets}</Text>
+  <TouchableOpacity onPress={recording ? stopRecording : openNameModal} style={[styles.recBtn, recording ? styles.recStop : styles.recStart]}>
+          <Text style={styles.recText}>{recording ? 'Stop' : 'Record'}</Text>
+        </TouchableOpacity>
+      </View>
+      <View style={[styles.window, { marginBottom: spacing.md }]}> 
+        <CollapsibleSection title="Waveform" defaultExpanded>
+          <WaveformChart data={wave} height={160} color={params.name?.includes('PPG') ? colors.accentBlue : colors.accentGreen} background="transparent" yRange={[0, 1023]} />
+        </CollapsibleSection>
+      </View>
+      <View style={styles.window}>
+        <CollapsibleSection title="Raw (hex)" defaultExpanded>
+          <ScrollView style={styles.scroll} contentContainerStyle={{ paddingBottom: 12 }}>
+            <Text selectable style={styles.mono}>{lastHex}</Text>
+          </ScrollView>
+        </CollapsibleSection>
+      </View>
+      <View style={[styles.window, { marginTop: spacing.md }]}> 
+        <CollapsibleSection title="Parsed" defaultExpanded>
+          <ScrollView style={styles.scroll}>
+            <Text style={styles.code}>{parsed ? JSON.stringify(parsed, null, 2) : 'No parser or no data yet.'}</Text>
+            {lastSavedPath ? <Text style={[styles.code, { marginTop: 8, color: colors.accentBlue }]}>Saved: {lastSavedPath}</Text> : null}
+          </ScrollView>
+        </CollapsibleSection>
+      </View>
+    </View>
+  );
+}
+
+function safeCSV(v) {
+  if (v == null) return '';
+  const s = String(v);
+  if (s.includes(',') || s.includes('\n') || s.includes('"')) {
+    return '"' + s.replace(/"/g, '""') + '"';
+  }
+  return s;
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: colors.background, padding: spacing.md },
+  header: { fontSize: 20, fontWeight: '700', marginBottom: 6, color: colors.textPrimary },
+  meta: { color: colors.accentBlue },
+  topRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: spacing.md },
+  window: { borderWidth: StyleSheet.hairlineWidth, borderColor: colors.divider, borderRadius: radius.md, padding: spacing.md, backgroundColor: colors.card },
+  label: { fontWeight: '700', marginBottom: 6, color: colors.textSecondary },
+  scroll: { maxHeight: 180 },
+  mono: { color: colors.textPrimary, fontFamily: Platform.select({ ios: 'Menlo', android: 'monospace', default: 'monospace' }), fontSize: 12, lineHeight: 18 },
+  code: { color: colors.textPrimary, fontSize: 12, lineHeight: 18 },
+  recBtn: { paddingHorizontal: spacing.md, paddingVertical: spacing.xs, borderRadius: radius.sm },
+  recStart: { backgroundColor: colors.accentRed },
+  recStop: { backgroundColor: colors.accentBlue },
+  recText: { color: '#000', fontWeight: '800' },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center' },
+  modalCard: { width: '86%', backgroundColor: colors.card, borderRadius: radius.md, padding: spacing.md, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.divider },
+  modalTitle: { color: colors.textPrimary, fontWeight: '700', fontSize: 16, marginBottom: spacing.sm },
+  input: { backgroundColor: '#111', color: colors.textPrimary, borderRadius: radius.sm, paddingHorizontal: spacing.sm, paddingVertical: spacing.xs, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.divider },
+  modalRow: { flexDirection: 'row', justifyContent: 'flex-end', gap: spacing.sm, marginTop: spacing.md },
+  modalBtn: { paddingHorizontal: spacing.md, paddingVertical: spacing.xs, borderRadius: radius.sm },
+  cancelBtn: { backgroundColor: colors.card },
+  okBtn: { backgroundColor: colors.accentGreen },
+  modalBtnText: { color: colors.textPrimary, fontWeight: '700' },
+  dirRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: spacing.sm },
+  dirText: { color: colors.textSecondary },
+});
+
