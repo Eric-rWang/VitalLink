@@ -13,11 +13,13 @@ export default function WaveformChart({ data, height = 160, color = '#32D74B', b
   const width = 360; // will stretch via style container; we compute points relative to this width
 
   const points = useMemo(() => {
-    const n = data.length || 1;
+    if (!Array.isArray(data) || data.length === 0) return '';
+    const n = data.length;
     const [yMin, yMax] = yRange;
     const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
     const mapY = (v) => {
-      const t = (clamp(v, yMin, yMax) - yMin) / Math.max(1, (yMax - yMin));
+      const val = Number.isFinite(v) ? v : yMin;
+      const t = (clamp(val, yMin, yMax) - yMin) / Math.max(1, (yMax - yMin));
       return height - t * height; // invert so higher values are higher on screen
     };
     let pts = '';
@@ -49,7 +51,9 @@ export default function WaveformChart({ data, height = 160, color = '#32D74B', b
       <Svg width="100%" height="100%" viewBox={`0 0 ${width} ${height}`}>
         <Rect x="0" y="0" width="100%" height="100%" fill={background} />
         {grid}
-        <Polyline points={points} fill="none" stroke={color} strokeWidth={2} />
+        {points ? (
+          <Polyline points={points} fill="none" stroke={color} strokeWidth={2} />
+        ) : null}
       </Svg>
     </View>
   );

@@ -14,7 +14,7 @@ const RootLayout = () => {
     >
       <Stack.Screen name="splash" options={{ headerShown: false }} />
       <Stack.Screen name="index" options={{ title: "", headerShown: false }} />
-      <Stack.Screen name="devices" options={{ title: "Select a Device" }} />
+      <Stack.Screen name="devices" options={{ title: "Devices" }} />
       <Stack.Screen name="stream" options={{ title: "Live Stream" }} />
     </Stack>
   );
