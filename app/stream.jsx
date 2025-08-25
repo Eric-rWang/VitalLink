@@ -1,6 +1,6 @@
 import { useLocalSearchParams } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import CollapsibleSection from '../components/CollapsibleSection';
 import WaveformChart from '../components/WaveformChart';
 import { DEVICE_WHITELIST, getDeviceById } from '../constants/bleDevices';
@@ -150,19 +150,44 @@ export default function StreamScreen() {
   }
 
   async function chooseFolder() {
-    if (Platform.OS === 'android') {
-      try {
+    try {
+      if (Platform.OS === 'android') {
         const SAF = FileSystem.StorageAccessFramework;
-        const perm = await SAF.requestDirectoryPermissionsAsync();
-        if (perm.granted) {
-          setSaveDir({ type: 'android-saf', uri: perm.directoryUri });
-          setSaveDirLabel('Android SAF');
+        if (!SAF || !SAF.requestDirectoryPermissionsAsync) {
+          Alert.alert('Not supported', 'This device does not support folder selection via SAF. Files will be saved to the app Documents folder instead.');
+          setSaveDir({ type: 'app' });
+          setSaveDirLabel('App Documents');
+          return;
         }
-      } catch (e) {
-        console.warn('Folder selection failed', e);
+        const perm = await SAF.requestDirectoryPermissionsAsync();
+        // Some SDKs return { granted, directoryUri } and some return { granted }
+        const granted = perm && (perm.granted === true || perm.granted === 'granted');
+        const uri = perm && (perm.directoryUri || perm.directoryURI || perm.uri);
+        if (granted && uri) {
+          setSaveDir({ type: 'android-saf', uri });
+          setSaveDirLabel('Android SAF');
+          Alert.alert('Folder selected', 'Files will be written to the selected folder.');
+        } else if (granted && !uri) {
+          // permission granted but no uri returned (older SDKs) — fallback to app dir
+          setSaveDir({ type: 'app' });
+          setSaveDirLabel('App Documents');
+          Alert.alert('Selected', 'Permission granted but no folder returned. Files will be saved to the app Documents folder.');
+        } else {
+          Alert.alert('Permission required', 'Permission to access a folder was not granted. Files will be saved to the app Documents folder.');
+          setSaveDir({ type: 'app' });
+          setSaveDirLabel('App Documents');
+        }
+      } else {
+        // iOS: sandboxed; there is no general folder picker. Use app Documents and explain to user.
+        const baseDir = FileSystem.documentDirectory + 'data/';
+        try { await FileSystem.makeDirectoryAsync(baseDir, { intermediates: true }); } catch {}
+        setSaveDir({ type: 'app' });
+        setSaveDirLabel('App Documents');
+        Alert.alert('iOS location', 'iOS does not allow selecting arbitrary folders. Files will be saved to the app Documents/data folder. You can export the file after recording.');
       }
-    } else {
-      // iOS: sandboxed; use app documents
+    } catch (e) {
+      console.warn('Folder selection failed', e);
+      Alert.alert('Error', String(e?.message || e));
       setSaveDir({ type: 'app' });
       setSaveDirLabel('App Documents');
     }
