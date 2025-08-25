@@ -1,6 +1,6 @@
-import { useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, Vibration, View } from 'react-native';
 import CollapsibleSection from '../components/CollapsibleSection';
 import WaveformChart from '../components/WaveformChart';
 import { DEVICE_WHITELIST, getDeviceById } from '../constants/bleDevices';
@@ -16,6 +16,7 @@ function bytesToHex(bytes) {
 import * as FileSystem from 'expo-file-system';
 export default function StreamScreen() {
   const params = useLocalSearchParams();
+  const router = useRouter();
   const ble = useMemo(() => new BLEClient(), []);
   const unsubRef = useRef(null);
   const [status, setStatus] = useState('idle');
@@ -27,6 +28,7 @@ export default function StreamScreen() {
   const [recording, setRecording] = useState(false);
   const recordHeaderRef = useRef(null); // string[]
   const recordRowsRef = useRef([]); // string[] of csv lines
+  const recordingRef = useRef(recording);
   const [lastSavedPath, setLastSavedPath] = useState(null);
   const [showNameModal, setShowNameModal] = useState(false);
   const [fileName, setFileName] = useState('');
@@ -79,13 +81,33 @@ export default function StreamScreen() {
           },
         });
         unsubRef.current = unsubscribe;
+        // listen for disconnect events from the BLE client and notify the user
+        const off = ble.on('disconnect', async (info) => {
+          try {
+            // If we were recording, save and stop recording first
+            if (recordingRef.current) {
+              try { await stopRecording(); } catch (e) { console.warn('Failed to save on disconnect', e); }
+            }
+            // If this disconnect was initiated manually (e.g. user navigated away),
+            // don't show the alert or auto-navigate — just update status.
+            if (info && info.reason === 'manual') {
+              setStatus('disconnected');
+              return;
+            }
+            // vibrate briefly on supported platforms
+            try { Vibration.vibrate(500); } catch {}
+            Alert.alert('Disconnected', 'The connection to the device was lost.');
+            setStatus('disconnected');
+            try { router.push('/devices'); } catch (e) { console.warn('Navigation on disconnect failed', e); }
+          } catch (e) { console.warn('Disconnect handler error', e); }
+        });
         setStatus('streaming');
       } catch (e) {
         console.warn('Connect/subscribe error', e);
         setStatus('error');
       }
-    })();
-    return () => { mounted = false; unsubRef.current?.(); ble.disconnect(); };
+  })();
+  return () => { mounted = false; unsubRef.current?.(); ble.disconnect(); try { off && off(); } catch {} };
   }, [ble, params.deviceId, params.name]);
 
   const openNameModal = () => {
@@ -108,6 +130,9 @@ export default function StreamScreen() {
     recordRowsRef.current = [];
     setRecording(true);
   };
+
+  // keep a ref of current recording state for async handlers
+  useEffect(() => { recordingRef.current = recording; }, [recording]);
 
   const stopRecording = async () => {
     setRecording(false);
@@ -232,14 +257,14 @@ export default function StreamScreen() {
         </CollapsibleSection>
       </View>
       <View style={styles.window}>
-        <CollapsibleSection title="Raw (hex)" defaultExpanded>
+        <CollapsibleSection title="Raw (hex)" defaultExpanded={false}>
           <ScrollView style={styles.scroll} contentContainerStyle={{ paddingBottom: 12 }}>
             <Text selectable style={styles.mono}>{lastHex}</Text>
           </ScrollView>
         </CollapsibleSection>
       </View>
       <View style={[styles.window, { marginTop: spacing.md }]}> 
-        <CollapsibleSection title="Parsed" defaultExpanded>
+        <CollapsibleSection title="Parsed" defaultExpanded={false}>
           <ScrollView style={styles.scroll}>
             <Text style={styles.code}>{parsed ? JSON.stringify(parsed, null, 2) : 'No parser or no data yet.'}</Text>
             {lastSavedPath ? <Text style={[styles.code, { marginTop: 8, color: colors.accentBlue }]}>Saved: {lastSavedPath}</Text> : null}
