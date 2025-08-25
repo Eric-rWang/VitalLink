@@ -259,11 +259,12 @@ function safeCSV(v) {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.background, padding: spacing.md },
+  // add extra top padding so content sits further below the header
+  container: { flex: 1, backgroundColor: 'transparent', padding: spacing.md, paddingTop: spacing.md + 20 },
   header: { fontSize: 20, fontWeight: '700', marginBottom: 6, color: colors.textPrimary },
   meta: { color: colors.accentBlue },
   topRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: spacing.md },
-  window: { borderWidth: StyleSheet.hairlineWidth, borderColor: colors.divider, borderRadius: radius.md, padding: spacing.md, backgroundColor: colors.card },
+  window: { borderWidth: StyleSheet.hairlineWidth, borderColor: colors.divider, borderRadius: radius.md, padding: spacing.md, backgroundColor: 'rgba(28,28,30,0.7)' },
   label: { fontWeight: '700', marginBottom: 6, color: colors.textSecondary },
   scroll: { maxHeight: 180 },
   mono: { color: colors.textPrimary, fontFamily: Platform.select({ ios: 'Menlo', android: 'monospace', default: 'monospace' }), fontSize: 12, lineHeight: 18 },

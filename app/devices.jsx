@@ -1,11 +1,13 @@
 import { useRouter } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, FlatList, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { DEVICE_WHITELIST } from '../constants/bleDevices';
 import { colors, radius, spacing } from '../constants/theme';
 import { BLEClient } from '../lib/bleClient';
 
 export default function DevicesScreen() {
+  const insets = useSafeAreaInsets();
   const router = useRouter();
   const ble = useMemo(() => new BLEClient(), []);
   const [loading, setLoading] = useState(true);
@@ -37,7 +39,7 @@ export default function DevicesScreen() {
 
   if (loading) {
     return (
-      <View style={styles.center}> 
+      <View style={[styles.center, { paddingTop: insets.top + 20 }]}> 
         <ActivityIndicator size="large" color={colors.accentGreen} />
         <Text style={{ marginTop: 12, color: colors.textSecondary }}>Scanning for devices…</Text>
       </View>
@@ -46,13 +48,13 @@ export default function DevicesScreen() {
 
   return (
     <FlatList
-      style={{ backgroundColor: colors.background }}
-      contentContainerStyle={styles.list}
+      style={{ backgroundColor: 'transparent' }}
+      contentContainerStyle={[styles.list, { paddingTop: insets.top + 20 }]}
       data={devices}
       keyExtractor={(item) => item.id}
       ListEmptyComponent={<Text style={{ color: colors.textSecondary }}>No whitelisted devices found. Ensure the device is on and nearby.</Text>}
       renderItem={({ item }) => (
-        <TouchableOpacity onPress={() => onSelect(item)} style={styles.item}>
+  <TouchableOpacity onPress={() => onSelect(item)} style={styles.item}>
           <Text style={styles.title}>{item.name}</Text>
           <Text style={styles.sub}>ID: {item.id}</Text>
         </TouchableOpacity>
@@ -62,9 +64,10 @@ export default function DevicesScreen() {
 }
 
 const styles = StyleSheet.create({
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.background },
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: 'transparent' },
   list: { paddingVertical: spacing.md, paddingHorizontal: spacing.md },
-  item: { padding: spacing.md, backgroundColor: colors.card, borderRadius: radius.md, marginBottom: spacing.md, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.divider },
+  // device button background: dark grey for better contrast over gradient
+  item: { padding: spacing.md, backgroundColor: colors.cardElevated, borderRadius: radius.md, marginBottom: spacing.md, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.divider },
   title: { fontSize: 16, fontWeight: '600', color: colors.textPrimary },
   sub: { color: colors.textSecondary, marginTop: 4 },
 });
