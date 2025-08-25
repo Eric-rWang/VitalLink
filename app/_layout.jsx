@@ -1,8 +1,30 @@
 import { LinearGradient } from 'expo-linear-gradient';
 import { Stack } from "expo-router";
-import { StyleSheet, View } from 'react-native';
+import React, { useRef } from 'react';
+import { Animated, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors } from "../constants/theme";
+
+// ScreenContainer: hides children until the view has laid out and a short
+// delay passes, then fades them in. Keeps the Animated.Value stable across renders.
+export function ScreenContainer({ children, style, delay = 80, fade = 180 }) {
+  const opacity = useRef(new Animated.Value(0)).current;
+  const ready = useRef(false);
+
+  const onLayout = () => {
+    if (ready.current) return;
+    ready.current = true;
+    setTimeout(() => {
+      Animated.timing(opacity, { toValue: 1, duration: fade, useNativeDriver: true }).start();
+    }, delay);
+  };
+
+  return (
+    <Animated.View style={[style, { opacity }]} onLayout={onLayout}>
+      {children}
+    </Animated.View>
+  );
+}
 
 const RootLayout = () => {
   const insets = useSafeAreaInsets();

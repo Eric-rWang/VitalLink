@@ -7,6 +7,7 @@ import { DEVICE_WHITELIST, getDeviceById } from '../constants/bleDevices';
 import { colors, radius, spacing } from '../constants/theme';
 import { BLEClient } from '../lib/bleClient';
 import { getParser } from '../lib/parser';
+import { ScreenContainer } from './_layout';
 
 function bytesToHex(bytes) {
   return [...bytes].map((b) => b.toString(16).padStart(2, '0')).join(' ');
@@ -194,7 +195,7 @@ export default function StreamScreen() {
   }
 
   return (
-    <View style={styles.container}>
+    <ScreenContainer style={styles.container}>
       <Modal visible={showNameModal} animationType="fade" transparent onRequestClose={() => setShowNameModal(false)}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
@@ -245,7 +246,7 @@ export default function StreamScreen() {
           </ScrollView>
         </CollapsibleSection>
       </View>
-    </View>
+  </ScreenContainer>
   );
 }
 

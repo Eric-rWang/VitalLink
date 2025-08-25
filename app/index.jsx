@@ -4,12 +4,13 @@ import { StatusBar } from 'expo-status-bar';
 import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, radius, spacing } from "../constants/theme";
+import { ScreenContainer } from './_layout';
 
 const HomeScreen = () => {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   return (
-    <View style={styles.container}>
+    <ScreenContainer style={styles.container}>
       <LinearGradient
         colors={["#eaf6ff", "#1b2940", "#071018"]} // brighter light at top -> dark at bottom
         start={{ x: 0, y: 0 }}
@@ -27,7 +28,7 @@ const HomeScreen = () => {
           </LinearGradient>
         </TouchableOpacity>
       </View>
-    </View>
+    </ScreenContainer>
   );
 }
 
